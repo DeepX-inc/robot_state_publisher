@@ -143,8 +143,11 @@ RobotStatePublisher::RobotStatePublisher(const rclcpp::NodeOptions & options)
   setupURDF(urdf_xml);
 
   // subscribe to joint state
+  // Use sensor profile (best effort, volatile, keep_last)
+  // to ensure compatibility with any QoS set by the publisher.
+  rclcpp::QoS custom_qos(rclcpp::KeepLast(10), rmw_qos_profile_sensor_data);
   joint_state_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
-    "joint_states", 10, std::bind(
+    "joint_states", custom_qos, std::bind(
       &RobotStatePublisher::callbackJointState, this,
       std::placeholders::_1));
 
