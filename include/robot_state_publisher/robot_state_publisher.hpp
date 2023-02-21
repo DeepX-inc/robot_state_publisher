@@ -42,12 +42,14 @@
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
+#include "std_msgs/msg/header.hpp"
 #include "std_msgs/msg/string.hpp"
 #include "tf2_ros/static_transform_broadcaster.h"
 #include "tf2_ros/transform_broadcaster.h"
 #include "urdf/model.h"
 
 using MimicMap = std::map<std::string, urdf::JointMimicSharedPtr>;
+using Header = std_msgs::msg::Header;
 
 namespace robot_state_publisher
 {
@@ -153,6 +155,9 @@ protected:
 
   /// A pointer to the ROS 2 publisher for the robot_description
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr description_pub_;
+
+  /// A pointer to the ROS 2 publisher for the heartbeat
+  rclcpp::Publisher<Header>::SharedPtr heartbeat_pub_;
 
   /// A pointer to the ROS 2 subscription for the joint states
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
