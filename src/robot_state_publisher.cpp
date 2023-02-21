@@ -139,7 +139,9 @@ RobotStatePublisher::RobotStatePublisher(const rclcpp::NodeOptions & options)
     "robot_description",
     // Transient local is similar to latching in ROS 1.
     rclcpp::QoS(1).transient_local());
-
+  heartbeat_pub_ = this->create_publisher<Header>(
+    "~/heartbeat",
+    rclcpp::QoS(1));
   setupURDF(urdf_xml);
 
   // subscribe to joint state
@@ -337,6 +339,9 @@ void RobotStatePublisher::callbackJointState(const sensor_msgs::msg::JointState:
     }
 
     publishTransforms(joint_positions, state->header.stamp);
+    auto heartbeat_msg = std_msgs::msg::Header();
+    heartbeat_msg.stamp = this->get_clock()->now();
+    heartbeat_pub_->publish(heartbeat_msg);
 
     // store publish time in joint map
     for (size_t i = 0; i < state->name.size(); i++) {

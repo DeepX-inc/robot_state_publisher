@@ -36,6 +36,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/header.hpp>
 #include <tf2_ros/static_transform_broadcaster.h>
 #include <tf2_ros/transform_broadcaster.h>
 #include <urdf/model.h>
@@ -47,6 +48,7 @@
 #include <vector>
 
 using MimicMap = std::map<std::string, urdf::JointMimicSharedPtr>;
+using Header = std_msgs::msg::Header;
 
 namespace robot_state_publisher
 {
@@ -93,6 +95,7 @@ protected:
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   std::unique_ptr<tf2_ros::StaticTransformBroadcaster> static_tf_broadcaster_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr description_pub_;
+  rclcpp::Publisher<Header>::SharedPtr heartbeat_pub_;
   std::chrono::milliseconds publish_interval_ms_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
   rclcpp::TimerBase::SharedPtr timer_;
