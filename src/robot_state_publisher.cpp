@@ -31,12 +31,14 @@
 #include "robot_state_publisher/robot_state_publisher.hpp"
 
 #include <chrono>
+#include <cmath>
 #include <fstream>
 #include <functional>
 #include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -80,6 +82,12 @@ RobotStatePublisher::RobotStatePublisher(const rclcpp::NodeOptions & options)
     rclcpp::NodeOptions(options).start_parameter_services(false)
 )
 {
+  heartbeat_grace_period_s_ = this->declare_parameter("heartbeat_grace_period_s", 5.0);
+
+  last_callback_time_.store(this->now().nanoseconds(), std::memory_order_relaxed);
+
+  heartbeat_thread_ = std::thread(&RobotStatePublisher::heartbeatThreadLoop, this);
+
   // get the XML
   std::string urdf_xml = this->declare_parameter("robot_description", std::string(""));
   if (urdf_xml.empty()) {
@@ -164,6 +172,15 @@ RobotStatePublisher::RobotStatePublisher(const rclcpp::NodeOptions & options)
   parameter_subscription_ = rclcpp::AsyncParametersClient::on_parameter_event(
     this->get_node_topics_interface(),
     std::bind(&RobotStatePublisher::onParameterEvent, this, std::placeholders::_1));
+}
+
+// Destructor to stop/join the thread
+RobotStatePublisher::~RobotStatePublisher()
+{
+  stop_heartbeat_thread_.store(true, std::memory_order_relaxed);
+  if (heartbeat_thread_.joinable()) {
+    heartbeat_thread_.join();
+  }
 }
 
 KDL::Tree RobotStatePublisher::parseURDF(const std::string & urdf_xml, urdf::Model & model)
@@ -314,15 +331,23 @@ void RobotStatePublisher::callbackJointState(
     return;
   }
 
-  // check if we moved backwards in time (e.g. when playing a bag file)
-  rclcpp::Time now = this->now();
-  if (last_callback_time_.nanoseconds() > now.nanoseconds()) {
-    // force re-publish of joint ransforms
-    RCLCPP_WARN(
-      get_logger(), "Moved backwards in time, re-publishing joint transforms!");
+  // 1) Get current time and its nanoseconds
+  rclcpp::Time now_t = this->now();
+  int64_t now_ns = now_t.nanoseconds();
+
+  // 2) Load the previous callback time from the atomic
+  int64_t old_time_ns = last_callback_time_.load(std::memory_order_relaxed);
+
+  // 3) Check for a time regression (e.g. when playing a bag file)
+  if (old_time_ns > now_ns) {
+    RCLCPP_WARN(get_logger(),
+                "Moved backwards in time, re-publishing joint transforms!");
     last_publish_time_.clear();
   }
-  last_callback_time_ = now;
+
+  // 4) Store the current time into the atomic
+  last_callback_time_.store(now_ns, std::memory_order_relaxed);
+
 
   // determine least recently published joint
   rclcpp::Time last_published = now;
@@ -357,9 +382,9 @@ void RobotStatePublisher::callbackJointState(
     }
 
     publishTransforms(joint_positions, state->header.stamp);
-    auto heartbeat_msg = std_msgs::msg::Header();
-    heartbeat_msg.stamp = this->get_clock()->now();
-    heartbeat_pub_->publish(heartbeat_msg);
+    // auto heartbeat_msg = std_msgs::msg::Header();
+    // heartbeat_msg.stamp = this->get_clock()->now();
+    // heartbeat_pub_->publish(heartbeat_msg);
 
     // store publish time in joint map
     for (size_t i = 0; i < state->name.size(); i++) {
@@ -427,6 +452,32 @@ void RobotStatePublisher::onParameterEvent(
         RCLCPP_WARN(get_logger(), "Failed to parse new URDF: %s", err.what());
       }
     }
+  }
+}
+
+void RobotStatePublisher::heartbeatThreadLoop()
+{
+  rclcpp::Rate rate(5.0);  // or whatever
+  while (rclcpp::ok() && !stop_heartbeat_thread_.load(std::memory_order_relaxed))
+  {
+    const int64_t now_ns  = this->now().nanoseconds();
+    const int64_t last_ns = last_callback_time_.load(std::memory_order_relaxed);
+    const double diff_sec = static_cast<double>(now_ns - last_ns) / 1e9;
+
+    if (diff_sec <= heartbeat_grace_period_s_) {
+      // Publish heartbeat
+      auto hb_msg = std_msgs::msg::Header();
+      hb_msg.stamp = this->get_clock()->now();
+      heartbeat_pub_->publish(hb_msg);
+    } else {
+      RCLCPP_WARN(
+        get_logger(),
+        "No joint_state update for %.2f s (threshold is %.2f). Stopping heartbeat.",
+        diff_sec, heartbeat_grace_period_s_);
+      break;
+    }
+
+    rate.sleep();
   }
 }
 

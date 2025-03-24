@@ -31,9 +31,12 @@
 #ifndef ROBOT_STATE_PUBLISHER__ROBOT_STATE_PUBLISHER_HPP_
 #define ROBOT_STATE_PUBLISHER__ROBOT_STATE_PUBLISHER_HPP_
 
+#include <atomic>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "builtin_interfaces/msg/time.hpp"
@@ -76,6 +79,9 @@ class RobotStatePublisher : public rclcpp::Node
 public:
   /// Constructor
   explicit RobotStatePublisher(const rclcpp::NodeOptions & options);
+
+  // Destructor
+  ~RobotStatePublisher() override;
 
 protected:
   KDL::Tree parseURDF(const std::string & urdf_xml, urdf::Model & model);
@@ -163,10 +169,19 @@ protected:
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
 
   /// The last time a joint state message was received
-  rclcpp::Time last_callback_time_;
+  std::atomic<int64_t> last_callback_time_{0};
 
   /// A map between a joint name and the last time its state was published
   std::map<std::string, builtin_interfaces::msg::Time> last_publish_time_;
+
+  // Thread to publish heartbeat
+  std::thread heartbeat_thread_;
+
+  // Flag to stop thread gracefully
+  std::atomic<bool> stop_heartbeat_thread_{false};
+  
+  // Grace period for heartbeat publisher thread
+  double heartbeat_grace_period_s_{5.0};
 
   /// A map of the mimic joints that should be published
   MimicMap mimic_;
@@ -177,6 +192,9 @@ protected:
   /// The parameter event callback that will be called when a parameter is changed
   std::shared_ptr<rclcpp::Subscription<rcl_interfaces::msg::ParameterEvent,
     std::allocator<void>>> parameter_subscription_;
+
+  // Method running in the dedicated thread
+  void heartbeatThreadLoop() override;  
 };
 
 }  // namespace robot_state_publisher
