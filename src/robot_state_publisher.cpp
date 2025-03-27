@@ -82,7 +82,14 @@ RobotStatePublisher::RobotStatePublisher(const rclcpp::NodeOptions & options)
     rclcpp::NodeOptions(options).start_parameter_services(false)
 )
 {
-  heartbeat_grace_period_s_ = this->declare_parameter("heartbeat_grace_period_s", 5.0);
+  heartbeat_grace_period_s_ = this->declare_parameter("heartbeat_grace_period_s", 1.0);
+  double hb_param;
+  if (this->get_parameter("heartbeat_grace_period_s", hb_param)) {
+    RCLCPP_INFO(get_logger(), "Heartbeat grace period is: %.2f seconds", hb_param);
+  } else {
+    RCLCPP_WARN(get_logger(), "Failed to get heartbeat_grace_period_s parameter");
+  }
+
 
   last_callback_time_.store(this->now().nanoseconds(), std::memory_order_relaxed);
 
@@ -350,7 +357,7 @@ void RobotStatePublisher::callbackJointState(
 
 
   // determine least recently published joint
-  rclcpp::Time last_published = now;
+  rclcpp::Time last_published = this->now();
   for (size_t i = 0; i < state->name.size(); i++) {
     rclcpp::Time t(last_publish_time_[state->name[i]]);
     last_published = (t.nanoseconds() < last_published.nanoseconds()) ? t : last_published;
@@ -382,9 +389,6 @@ void RobotStatePublisher::callbackJointState(
     }
 
     publishTransforms(joint_positions, state->header.stamp);
-    // auto heartbeat_msg = std_msgs::msg::Header();
-    // heartbeat_msg.stamp = this->get_clock()->now();
-    // heartbeat_pub_->publish(heartbeat_msg);
 
     // store publish time in joint map
     for (size_t i = 0; i < state->name.size(); i++) {
@@ -457,7 +461,7 @@ void RobotStatePublisher::onParameterEvent(
 
 void RobotStatePublisher::heartbeatThreadLoop()
 {
-  rclcpp::Rate rate(5.0);  // or whatever
+  rclcpp::Rate rate(5.0);  // 5 Hz loop rate
   while (rclcpp::ok() && !stop_heartbeat_thread_.load(std::memory_order_relaxed))
   {
     const int64_t now_ns  = this->now().nanoseconds();
@@ -465,16 +469,16 @@ void RobotStatePublisher::heartbeatThreadLoop()
     const double diff_sec = static_cast<double>(now_ns - last_ns) / 1e9;
 
     if (diff_sec <= heartbeat_grace_period_s_) {
-      // Publish heartbeat
+      // Publish heartbeat if joint state updates are within the grace period.
       auto hb_msg = std_msgs::msg::Header();
       hb_msg.stamp = this->get_clock()->now();
       heartbeat_pub_->publish(hb_msg);
     } else {
+      // Log a warning if the grace period is exceeded.
       RCLCPP_WARN(
         get_logger(),
-        "No joint_state update for %.2f s (threshold is %.2f). Stopping heartbeat.",
+        "No joint_state update for %.2f s (threshold is %.2f). Not publishing heartbeat.",
         diff_sec, heartbeat_grace_period_s_);
-      break;
     }
 
     rate.sleep();
